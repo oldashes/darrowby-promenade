@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Darrowby Promenade · 纵深三平面 2.5D 暮雪漫步</title>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        if (params.get('clean') === '1' || params.has('t')) {
+          document.documentElement.classList.add('clean-mode');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-CWUhCU5y.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-r-SXCfka.css">
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gl-canvas"></canvas>
+
+      <div id="loading-badge" class="loading-badge">
+        <span class="dot"></span>
+        <span>正在构建三平面 2.5D 暮雪街道与 2048px 延迟 PBR 管线...</span>
+      </div>
+
+      <div class="hud-overlay">
+        <header class="hud-top">
+          <div class="title-card">
+            <div class="title-row">
+              <span class="badge-tag">THREE-PLANE 2.5D · DEFERRED PBR</span>
+              <span id="phase-label" class="phase-pill">❄️ 暮雪炉火</span>
+              <span id="bg-badge" class="bg-pill">🖼️ AI 原画远景</span>
+            </div>
+            <h1>Darrowby Promenade · 约克郡纵深雪村长廊</h1>
+          </div>
+
+          <div class="toolbar-stack">
+            <div class="toolbar-row">
+              <div class="pill-group" role="group" aria-label="远景方案对比">
+                <button class="bg-btn active" data-bg="ai">🖼️ AI 原画远景</button>
+                <button class="bg-btn" data-bg="proc">⚡ 纯代码远景</button>
+              </div>
+
+              <div class="pill-group" role="group" aria-label="漫步方式">
+                <button class="nav-btn active" data-nav="cruise">🎥 电影巡游</button>
+                <button class="nav-btn" data-nav="walk">🚶 自由漫步</button>
+              </div>
+
+              <div class="pill-group" role="group" aria-label="天光氛围">
+                <button class="mode-btn active" data-mode="dusk">❄️ 暮雪炉火</button>
+                <button class="mode-btn" data-mode="eclipse">🌗 日食掠影</button>
+                <button class="mode-btn" data-mode="morning">☀️ 雪霁晨光</button>
+                <button class="mode-btn" data-mode="night">🌙 深冬星夜</button>
+              </div>
+            </div>
+
+            <div class="toolbar-row">
+              <div class="pill-group" role="group" aria-label="地标直达">
+                <button class="view-btn" data-view="watermill">🎡 水车石桥</button>
+                <button class="view-btn" data-view="kiln">🔥 暖光砖窑</button>
+                <button class="view-btn" data-view="bakery">🥐 杂货街角</button>
+                <button class="view-btn" data-view="tower">⛪ 钟楼牧场</button>
+              </div>
+              <div class="pill-group">
+                <button id="btn-play" class="icon-btn" title="播放 / 暂停 (Space)">⏸ 暂停</button>
+                <button id="btn-reset-view" class="icon-btn" title="重置视角 (R)">🧭 回正</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <footer class="hud-bottom">
+          <div id="story-toast" class="story-toast">
+            <span id="story-text">水车碾过冰川溪流，前方砖窑炉火正融化积雪...</span>
+            <button id="btn-interact" class="interact-btn hidden">🔥 E 添柴旺火</button>
+          </div>
+
+          <div class="bottom-meta">
+            <div class="scrubber-wrap" id="scrubber-wrap">
+              <span class="scrub-label">时间帧</span>
+              <input id="time-slider" type="range" min="0" max="24" step="0.05" value="8.0" />
+              <span id="time-readout" class="scrub-time">08.0s / 24s</span>
+            </div>
+            <div class="hint-pill">按住拖拽调上下左右视角 · 滚轮/双指缩放 · 轻点路面漫步 · WASD · E 添柴</div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>
