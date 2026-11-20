@@ -403,6 +403,7 @@ uniform float uPhase;
 uniform float uMousePx;
 uniform float uMousePy;
 uniform float uCamYaw;
+uniform float uCamPitch;
 uniform float uValleyDepth;
 uniform float uHdrScale;
 uniform vec2 uResolution;
@@ -487,7 +488,8 @@ vec3 reconstructWorldPos(vec2 uv, float depth) {
 // Pipeline B: 100% Pure GLSL Layered Pennine Mountains, Storm Clouds & Distant Ruined Abbey!
 vec3 evalProceduralMountainVista(vec2 uv) {
   float zoom = 1.0 + uValleyDepth * 0.14;
-  vec2 zuv = (uv - vec2(0.5, 0.42)) / zoom + vec2(0.5, 0.42);
+  vec2 tiltedUv = vec2(uv.x, uv.y + uCamPitch * 0.48);
+  vec2 zuv = (tiltedUv - vec2(0.5, 0.42)) / zoom + vec2(0.5, 0.42);
   float px = uCamYaw * 0.28 + uCameraPos.x * 0.010 + uMousePx * 0.025;
   float py = (uCameraPos.y - 2.6) * 0.015 + uMousePy * 0.015 - 0.04;
 
@@ -575,23 +577,27 @@ vec3 evalProceduralMountainVista(vec2 uv) {
 vec3 evalAiPanoramaVista(vec2 uv) {
   float zoom = 1.0 + uValleyDepth * 0.14;
   vec2 zuv = (uv - vec2(0.5, 0.44)) / zoom + vec2(0.5, 0.44);
-  float px = clamp(uCamYaw * 0.16 + uCameraPos.x * 0.0045 + uMousePx * 0.012, -0.14, 0.14);
-  float py = clamp((uCameraPos.y - 2.6) * 0.010 + uMousePy * 0.008 - 0.05, -0.09, 0.05);
-  vec2 bgUv = vec2(clamp(zuv.x * 0.74 + 0.12 + px, 0.005, 0.995), clamp(1.0 - zuv.y + py, 0.005, 0.995));
+  float px = clamp(uCamYaw * 0.15 + uCameraPos.x * 0.0045 + uMousePx * 0.012, -0.155, 0.155);
+  float py = clamp(-uCamPitch * 0.42 + (uCameraPos.y - 2.6) * 0.010 + uMousePy * 0.008, -0.22, 0.18);
+  float rawU = zuv.x * 0.68 + 0.16 + px;
+  float rawV = (1.0 - zuv.y) * 0.76 + 0.14 + py;
+  vec2 bgUv = vec2(clamp(rawU, 0.005, 0.995), clamp(rawV, 0.005, 0.995));
   vec3 aiCol = pow(texture(uAiBgTex, bgUv).rgb, vec3(2.2)) * uBgGrade;
+  vec3 zenithLin = pow(vec3(0.11, 0.16, 0.26) * uBgGrade, vec3(2.2));
+  aiCol = mix(zenithLin, aiCol, smoothstep(-0.08, 0.02, rawV));
   if (uUmbra.y > 0.05) {
-    vec2 sunUv = vec2(0.54 - px * 0.5, 0.70 - py * 0.5);
+    vec2 sunUv = vec2(0.54 - px * 0.5, 0.70 - uCamPitch * 0.42 - py * 0.15);
     float dSun = length((zuv - sunUv) * vec2(1.75, 1.0));
     aiCol += vec3(0.95, 0.72, 0.38) * exp(-dSun * 8.5) * uUmbra.y * 0.65;
     float moonDisc = 1.0 - smoothstep(0.032, 0.038, dSun);
     aiCol = mix(aiCol, vec3(0.02, 0.03, 0.06), moonDisc * uUmbra.y * 0.9);
   }
-  if (uStarVis > 0.1 && zuv.y > 0.52) {
+  if (uStarVis > 0.1 && zuv.y + uCamPitch * 0.42 > 0.52) {
     float st = hash21(floor(uv * uResolution * 0.22));
     if (st > 0.9965) aiCol += vec3(0.75, 0.84, 1.0) * uStarVis * 0.6;
   }
   vec3 fogLin = pow(uFogColor, vec3(2.2));
-  float mist = 1.0 - smoothstep(0.14, 0.36, zuv.y);
+  float mist = 1.0 - smoothstep(0.14, 0.36, zuv.y + uCamPitch * 0.42);
   return mix(aiCol, fogLin, mist * 0.48);
 }
 
@@ -1462,11 +1468,16 @@ export class PromenadeRenderer {
     gl.uniform2f(gl.getUniformLocation(this.baseLightProg, 'uUmbra'), atmo.umbraCx, atmo.umbraStrength);
     gl.uniform1i(gl.getUniformLocation(this.baseLightProg, 'uBgMode'), bgMode === 'ai' ? 0 : 1);
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uPhase'), phase);
-    const camYaw = Math.atan2(cam.targetX - cam.x, Math.max(0.5, -(cam.targetZ - cam.z)));
+    const dxCam = cam.targetX - cam.x;
+    const dyCam = cam.targetY - cam.y;
+    const dzCam = cam.targetZ - cam.z;
+    const camYaw = Math.atan2(dxCam, Math.max(0.5, -dzCam));
+    const camPitch = Math.atan2(dyCam, Math.max(0.5, Math.hypot(dxCam, dzCam)));
     const valleyDepth = Math.max(0, Math.min(1, (22 - cam.z) / 44));
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uMousePx'), mousePx);
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uMousePy'), mousePy);
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uCamYaw'), camYaw);
+    gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uCamPitch'), camPitch);
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uValleyDepth'), valleyDepth);
     gl.uniform1f(gl.getUniformLocation(this.baseLightProg, 'uHdrScale'), hdrScale);
     gl.uniform2f(gl.getUniformLocation(this.baseLightProg, 'uResolution'), width, height);

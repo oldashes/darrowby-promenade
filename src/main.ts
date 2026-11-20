@@ -22,6 +22,7 @@ declare global {
     setBgMode?: (bg: BgMode) => void;
     setCameraView?: (view: LandmarkInfo['id'] | 'cruise') => void;
     setPlayerPos?: (x: number, z: number) => void;
+    setLookOffset?: (yaw: number, pitch: number, zoom?: number) => void;
     stokeKiln?: () => void;
     __renderReady?: boolean;
     __aiBgReady?: boolean;
@@ -60,9 +61,10 @@ function targetCamForView(
   playerX: number,
   playerZ: number,
   navMode: NavMode,
+  zoomScale = 1.0,
 ): CameraPose {
   const groundY = walkGroundHeightAt(playerZ);
-  const camZ = playerZ + (navMode === 'cruise' ? 6.2 : 5.8);
+  const camZ = playerZ + (navMode === 'cruise' ? 6.2 : 5.8) * zoomScale;
   return {
     x: playerX * 0.55 + laneCenterX(camZ) * 0.45,
     y: groundY + (navMode === 'cruise' ? 2.65 : 2.45),
@@ -86,6 +88,7 @@ function bootstrap(): void {
   const timeSlider = document.getElementById('time-slider') as HTMLInputElement | null;
   const timeReadout = document.getElementById('time-readout');
   const btnPlay = document.getElementById('btn-play');
+  const btnResetView = document.getElementById('btn-reset-view');
 
   const bgBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.bg-btn'));
   const navBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-btn'));
@@ -132,13 +135,20 @@ function bootstrap(): void {
   let kilnBoost = 0;
   let clickTarget: { x: number; z: number } | null = null;
 
-  // Smooth mouse parallax in [-1..1]
+  // Smooth mouse parallax in [-1..1] + interactive drag-to-look + zoom
   let targetMousePx = 0;
   let targetMousePy = 0;
   let mousePx = 0;
   let mousePy = 0;
 
-  let cam: CameraPose = targetCamForView(playerX, playerZ, navMode);
+  let targetLookYaw = 0;
+  let lookYaw = 0;
+  let targetLookPitch = 0;
+  let lookPitch = 0;
+  let targetCamZoom = 1.0;
+  let camZoom = 1.0;
+
+  let cam: CameraPose = targetCamForView(playerX, playerZ, navMode, camZoom);
 
   const scene = buildPromenadeScene();
   window.__renderReady = false;
@@ -202,6 +212,13 @@ function bootstrap(): void {
     if (btnPlay) {
       btnPlay.textContent = isPlaying ? '⏸ 暂停' : '▶ 播放';
     }
+    if (btnResetView) {
+      const movedView =
+        Math.abs(lookYaw) > 0.03 ||
+        Math.abs(lookPitch) > 0.03 ||
+        Math.abs(camZoom - 1.0) > 0.04;
+      btnResetView.classList.toggle('active', movedView);
+    }
     if (timeSlider && document.activeElement !== timeSlider) {
       timeSlider.value = wrapTime(simTime).toFixed(2);
     }
@@ -212,13 +229,31 @@ function bootstrap(): void {
   }
 
   function effectiveCameraWithParallax(): CameraPose {
+    const bx = cam.targetX - cam.x;
+    const by = cam.targetY - cam.y;
+    const bz = cam.targetZ - cam.z;
+    const baseHoriz = Math.max(0.5, Math.hypot(bx, bz));
+    const baseYaw = Math.atan2(bx, -bz);
+    const basePitch = Math.atan2(by, baseHoriz);
+
+    const effYaw = baseYaw + lookYaw + mousePx * 0.06;
+    const effPitch = clamp(basePitch + lookPitch + mousePy * 0.035, -0.45, 0.56);
+
+    const camPosX = cam.x + Math.sin(lookYaw) * 1.1 + mousePx * 0.22;
+    const minGroundY = walkGroundHeightAt(playerZ) + 0.95;
+    const camPosY = Math.max(
+      minGroundY,
+      cam.y - Math.sin(lookPitch) * 0.72 + mousePy * 0.14,
+    );
+    const lookLen = 14.5;
+    const cosP = Math.cos(effPitch);
     return {
-      x: cam.x + mousePx * 0.72,
-      y: cam.y + mousePy * 0.30,
+      x: camPosX,
+      y: camPosY,
       z: cam.z,
-      targetX: cam.targetX + mousePx * 1.12,
-      targetY: cam.targetY + mousePy * 0.44,
-      targetZ: cam.targetZ,
+      targetX: camPosX + Math.sin(effYaw) * cosP * lookLen,
+      targetY: camPosY + Math.sin(effPitch) * lookLen,
+      targetZ: cam.z - Math.cos(effYaw) * cosP * lookLen,
     };
   }
 
@@ -257,6 +292,9 @@ function bootstrap(): void {
       camX: camPose.x,
       camY: camPose.y,
       camZ: camPose.z,
+      lookYaw,
+      lookPitch,
+      camZoom,
       aiBgReady: renderer.aiBgReady,
       kilnBoost,
       activeLandmark: activeLm.id,
@@ -289,7 +327,7 @@ function bootstrap(): void {
       playerZ = cruiseZAtTime(simTime);
       playerX = laneCenterX(playerZ);
     }
-    cam = targetCamForView(playerX, playerZ, navMode);
+    cam = targetCamForView(playerX, playerZ, navMode, camZoom);
     drawFrame();
   };
 
@@ -316,7 +354,7 @@ function bootstrap(): void {
         clickTarget = null;
       }
     }
-    cam = targetCamForView(playerX, playerZ, navMode);
+    cam = targetCamForView(playerX, playerZ, navMode, camZoom);
     drawFrame();
   };
 
@@ -328,7 +366,17 @@ function bootstrap(): void {
     const cx = laneCenterX(playerZ);
     playerX = clamp(x, cx - 2.1, cx + 2.1);
     playerYaw = Math.PI;
-    cam = targetCamForView(playerX, playerZ, 'walk');
+    cam = targetCamForView(playerX, playerZ, 'walk', camZoom);
+    drawFrame();
+  };
+
+  window.setLookOffset = (yaw: number, pitch: number, zoom?: number) => {
+    targetLookYaw = lookYaw = clamp(yaw, -0.82, 0.82);
+    targetLookPitch = lookPitch = clamp(pitch, -0.32, 0.48);
+    if (zoom !== undefined) {
+      targetCamZoom = camZoom = clamp(zoom, 0.65, 1.45);
+    }
+    cam = targetCamForView(playerX, playerZ, navMode, camZoom);
     drawFrame();
   };
 
@@ -382,7 +430,7 @@ function bootstrap(): void {
         playerYaw = Math.PI;
         clickTarget = null;
         walkSpeed = 0;
-        cam = targetCamForView(playerX, playerZ, navMode);
+        cam = targetCamForView(playerX, playerZ, navMode, camZoom);
         drawFrame();
       }
     });
@@ -391,6 +439,17 @@ function bootstrap(): void {
   btnPlay?.addEventListener('click', () => {
     isPlaying = !isPlaying;
     syncHud();
+  });
+
+  function resetCameraView(): void {
+    targetLookYaw = 0;
+    targetLookPitch = 0;
+    targetCamZoom = 1.0;
+    syncHud();
+  }
+
+  btnResetView?.addEventListener('click', () => {
+    resetCameraView();
   });
 
   btnInteract?.addEventListener('click', () => {
@@ -403,12 +462,12 @@ function bootstrap(): void {
     if (navMode === 'cruise') {
       playerZ = cruiseZAtTime(simTime);
       playerX = laneCenterX(playerZ);
-      cam = targetCamForView(playerX, playerZ, 'cruise');
+      cam = targetCamForView(playerX, playerZ, 'cruise', camZoom);
     }
     drawFrame();
   });
 
-  // Keyboard depth navigation + Space play/pause + E interact
+  // Keyboard depth navigation + Space play/pause + E interact + R reset view
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     const c = e.code;
@@ -424,6 +483,8 @@ function bootstrap(): void {
       if (isNearKiln()) {
         triggerStokeKiln(true);
       }
+    } else if (k === 'r' || c === 'KeyR') {
+      resetCameraView();
     } else if (c === 'Space' && document.activeElement?.tagName !== 'BUTTON') {
       e.preventDefault();
       isPlaying = !isPlaying;
@@ -438,32 +499,124 @@ function bootstrap(): void {
     if (c.startsWith('Key')) pressedKeys.delete(c.slice(3).toLowerCase());
   });
 
-  // Mouse parallax + click-to-walk on cobblestone lane
+  // Mouse subtle parallax on hover
   window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return;
     const nx = (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
     const ny = -((e.clientY / Math.max(1, window.innerHeight)) * 2 - 1);
     targetMousePx = clamp(nx, -1, 1);
     targetMousePy = clamp(ny, -1, 1);
   });
 
-  canvas.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const hit = renderer.screenToWalkPoint(
-      e.clientX,
-      e.clientY,
-      rect,
-      effectiveCameraWithParallax(),
-    );
-    if (hit) {
-      switchToWalk();
-      const hz = clamp(hit.z, -23.5, 21.5);
-      const cx = laneCenterX(hz);
-      clickTarget = {
-        x: clamp(hit.x, cx - 2.1, cx + 2.1),
-        z: hz,
-      };
+  // Unified drag-to-look (yaw/pitch) + pinch-to-zoom + short tap-to-walk on canvas
+  const activePointers = new Map<number, { x: number; y: number }>();
+  let dragDownPos = { x: 0, y: 0 };
+  let dragLastPos = { x: 0, y: 0 };
+  let dragMoved = false;
+  let wasPinching = false;
+  let lastPinchDist = 0;
+
+  function pinchDistance(): number {
+    const pts = Array.from(activePointers.values());
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore synthetic events
+    }
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 1) {
+      dragDownPos = { x: e.clientX, y: e.clientY };
+      dragLastPos = { x: e.clientX, y: e.clientY };
+      dragMoved = false;
+      wasPinching = false;
+    } else if (activePointers.size === 2) {
+      wasPinching = true;
+      dragMoved = true;
+      lastPinchDist = pinchDistance();
+      canvas.classList.remove('dragging');
     }
   });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size >= 2) {
+      const curDist = pinchDistance();
+      if (lastPinchDist > 0) {
+        const delta = curDist - lastPinchDist;
+        targetCamZoom = clamp(targetCamZoom - delta * 0.0035, 0.65, 1.45);
+      }
+      lastPinchDist = curDist;
+      dragMoved = true;
+      wasPinching = true;
+      return;
+    }
+
+    const dx = e.clientX - dragLastPos.x;
+    const dy = e.clientY - dragLastPos.y;
+    dragLastPos = { x: e.clientX, y: e.clientY };
+
+    if (!dragMoved && Math.hypot(e.clientX - dragDownPos.x, e.clientY - dragDownPos.y) > 6) {
+      dragMoved = true;
+      canvas.classList.add('dragging');
+    }
+    if (dragMoved) {
+      targetLookYaw = clamp(targetLookYaw - dx * 0.0052, -0.82, 0.82);
+      targetLookPitch = clamp(targetLookPitch + dy * 0.0045, -0.32, 0.48);
+    }
+  });
+
+  function onPointerFinish(e: PointerEvent, allowTapWalk: boolean): void {
+    const hadPointer = activePointers.delete(e.pointerId);
+    if (!hadPointer) return;
+
+    if (allowTapWalk && activePointers.size === 0 && !dragMoved && !wasPinching) {
+      const rect = canvas.getBoundingClientRect();
+      const hit = renderer.screenToWalkPoint(
+        e.clientX,
+        e.clientY,
+        rect,
+        effectiveCameraWithParallax(),
+      );
+      if (hit) {
+        switchToWalk();
+        const hz = clamp(hit.z, -23.5, 21.5);
+        const cx = laneCenterX(hz);
+        clickTarget = {
+          x: clamp(hit.x, cx - 2.1, cx + 2.1),
+          z: hz,
+        };
+      }
+    }
+
+    if (activePointers.size === 1) {
+      const remaining = Array.from(activePointers.values())[0];
+      dragLastPos = { x: remaining.x, y: remaining.y };
+    } else if (activePointers.size === 0) {
+      canvas.classList.remove('dragging');
+      wasPinching = false;
+      dragMoved = false;
+      lastPinchDist = 0;
+    }
+  }
+
+  canvas.addEventListener('pointerup', (e) => onPointerFinish(e, true));
+  canvas.addEventListener('pointercancel', (e) => onPointerFinish(e, false));
+
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      targetCamZoom = clamp(targetCamZoom + e.deltaY * 0.0012, 0.65, 1.45);
+    },
+    { passive: false },
+  );
 
   window.addEventListener('resize', () => {
     drawFrame();
@@ -478,6 +631,11 @@ function bootstrap(): void {
 
     mousePx += (targetMousePx - mousePx) * (1 - Math.exp(-dt * 6.0));
     mousePy += (targetMousePy - mousePy) * (1 - Math.exp(-dt * 6.0));
+
+    const lookLerp = 1 - Math.exp(-dt * 10.5);
+    lookYaw += (targetLookYaw - lookYaw) * lookLerp;
+    lookPitch += (targetLookPitch - lookPitch) * lookLerp;
+    camZoom += (targetCamZoom - camZoom) * lookLerp;
 
     if (kilnBoost > 0) {
       kilnBoost = Math.max(0, kilnBoost - dt / 4.2);
@@ -545,7 +703,7 @@ function bootstrap(): void {
       stepCooldown = Math.min(stepCooldown, 0.12);
     }
 
-    const goalCam = targetCamForView(playerX, playerZ, navMode);
+    const goalCam = targetCamForView(playerX, playerZ, navMode, camZoom);
     const camLerp = 1 - Math.exp(-dt * (navMode === 'cruise' ? 3.2 : 5.2));
     cam.x += (goalCam.x - cam.x) * camLerp;
     cam.y += (goalCam.y - cam.y) * camLerp;
